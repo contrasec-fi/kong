@@ -1,0 +1,45 @@
+stages:
+- uninstall
+- deploy
+
+uninstall:
+  tags:
+  - profirator
+  stage: uninstall
+  image: dtzar/helm-kubectl
+  variables:
+    KUBE: "$KUBECONFIG"
+    NAMESPACE: "odala-staging"
+  script:
+      - echo "$KUBE" > "$(pwd)/kube.config"
+      - echo "Uninstalling Kong..."
+      - helm uninstall kong -n $NAMESPACE --kubeconfig "$(pwd)/kube.config"
+  when: manual
+
+deploy:
+  tags:
+  - profirator
+  stage: deploy
+  image: dtzar/helm-kubectl
+  variables:
+    KUBE: "$KUBECONFIG"
+    NAMESPACE: "odala-staging"
+    DOMAIN: "$DOMAIN"
+    PROVIDER_ID: "$I4TRUST_PROVIDER_CLIENT_ID"
+    
+  script:
+      - echo "$KUBE" > "$(pwd)/kube.config"
+      - echo "Adding repository..."
+      - helm repo add kong https://charts.konghq.com
+      - helm repo update
+      
+      # Remember to replace REPLACE lines with certificates in charts/values-dbless.yaml file
+      - sed -i "s/NAMESPACE/${NAMESPACE}/g" ./endpoint-auth-service/charts/values-dbless.yaml
+      - sed -i "s/EU.EORI.PROVIDER/${PROVIDER_ID}/g" ./charts/values-dbless.yaml
+      - sed -i "s/DOMAIN/${DOMAIN_STAGING}/g" ./deployments/kong_ingress.yaml
+      
+      - echo "Installing Kong..."
+      - helm upgrade --install kong kong/kong -f ./charts/values-dbless.yaml -n $NAMESPACE --version v2.8.1 --kubeconfig "$(pwd)/kube.config"
+      - echo "Applying ingress..."
+      - kubectl -n odala-staging apply -f ./deployments/kong_ingress.yaml --kubeconfig "$(pwd)/kube.config"
+
